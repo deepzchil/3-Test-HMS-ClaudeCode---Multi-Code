@@ -1,0 +1,212 @@
+name: 🚀 Angular CI/CD to GCS (Dev/Test/Prod)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Select environment"
+        required: true
+        type: choice
+        options:
+          - cloud-dev
+          - cloud-test
+          - cloud-prod
+
+env:
+  BUCKET_NAME: 2claudedeploy
+
+jobs:
+
+# ==================================================
+# 🔁 MAP ENVIRONMENT → BRANCH
+# ==================================================
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.map.outputs.branch }}
+    steps:
+      - id: map
+        run: |
+          case "${{ github.event.inputs.environment }}" in
+            cloud-dev) echo "branch=dev" >> $GITHUB_OUTPUT ;;
+            cloud-test) echo "branch=test" >> $GITHUB_OUTPUT ;;
+            cloud-prod) echo "branch=main" >> $GITHUB_OUTPUT ;;
+          esac
+
+# ==================================================
+# 🏗️ BUILD + ZIP + ARTIFACT
+# ==================================================
+  build:
+    runs-on: ubuntu-latest
+    needs: setup
+
+    outputs:
+      zip_name: ${{ steps.zip.outputs.zip_name }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.setup.outputs.branch }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Angular
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          npm run build -- --configuration=$ENV
+
+      - name: Generate ZIP
+        id: zip
+        run: |
+          set -e
+
+          VERSION=$(node -p "require('./package.json').version")
+          TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+          ENV=${{ github.event.inputs.environment }}
+
+          ZIP_NAME="build_${ENV}_${TIMESTAMP}_v${VERSION}.zip"
+
+          DIST_DIR=$(find dist -mindepth 1 -maxdepth 1 -type d | head -n 1)
+
+          cd $DIST_DIR
+          zip -r ../../$ZIP_NAME .
+          cd -
+
+          echo "zip_name=$ZIP_NAME" >> $GITHUB_OUTPUT
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.zip.outputs.zip_name }}
+          path: ${{ steps.zip.outputs.zip_name }}
+          retention-days: 1
+
+# ==================================================
+# 📧 EMAIL (TEST PRE-APPROVAL)
+# ==================================================
+  notify-test:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event.inputs.environment == 'cloud-test'
+
+    steps:
+      - name: Send Email to Tech Lead
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Approval Required: Test Deployment"
+          to: ${{ secrets.TECH_LEAD_EMAIL }}
+          from: CI/CD Pipeline
+          html_body: |
+            <h2>Test Deployment Approval Required</h2>
+            <p>Please review changes and approve deployment.</p>
+
+      - name: Notify Manager
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          server_port: 587
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          subject: "Test Deployment Approval in Progress"
+          to: ${{ secrets.MANAGER_EMAIL }}
+          from: CI/CD Pipeline
+          body: "Approval requested from Tech Lead."
+
+# ==================================================
+# ⛔ APPROVAL GATE
+# ==================================================
+  approval:
+    runs-on: ubuntu-latest
+    needs: [build, notify-test]
+    environment:
+      name: ${{ github.event.inputs.environment }}
+    steps:
+      - run: echo "Approved"
+
+# ==================================================
+# ☁️ DEPLOY TO GCP
+# ==================================================
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [approval, build]
+
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.build.outputs.zip_name }}
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Upload & Retention
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          ZIP=${{ needs.build.outputs.zip_name }}
+
+          chmod +x scripts/gcp-retention.sh
+          ./scripts/gcp-retention.sh $ENV $ZIP
+
+      - name: Extract to Hosting Path
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          ZIP=${{ needs.build.outputs.zip_name }}
+
+          mkdir extracted
+          unzip $ZIP -d extracted
+
+          gsutil -m rsync -r extracted gs://$BUCKET_NAME/$ENV/live/
+
+      - name: Output URL
+        run: |
+          ENV=${{ github.event.inputs.environment }}
+          echo "🌐 URL: https://storage.googleapis.com/$BUCKET_NAME/$ENV/live/index.html"
+
+# ==================================================
+# 📧 SUCCESS / FAILURE EMAIL
+# ==================================================
+  notify-prod:
+    runs-on: ubuntu-latest
+    needs: deploy
+    if: always() && github.event.inputs.environment == 'cloud-prod'
+
+    steps:
+      - name: Send Success Email
+        if: success()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: CI/CD Pipeline
+          to: ${{ secrets.MANAGER_EMAIL }}
+          subject: "✅ Production Deployment Successful"
+          body: "Deployment completed successfully."
+
+      - name: Send Failure Email
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.SMTP_HOST }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
+          from: CI/CD Pipeline
+          to: ${{ secrets.MANAGER_EMAIL }}
+          subject: "❌ Production Deployment Failed"
+          body: "Deployment failed. Check logs."
