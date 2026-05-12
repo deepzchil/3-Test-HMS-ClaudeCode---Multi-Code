@@ -25,13 +25,16 @@ jobs:
     outputs:
       branch: ${{ steps.map.outputs.branch }}
     steps:
-      - id: map
-        run: |
-          case "${{ github.event.inputs.environment }}" in
-            cloud-dev) echo "branch=dev" >> $GITHUB_OUTPUT ;;
-            cloud-test) echo "branch=test" >> $GITHUB_OUTPUT ;;
-            cloud-prod) echo "branch=main" >> $GITHUB_OUTPUT ;;
-          esac
+        - id: map
+          run: |
+            echo "branch=main" >> $GITHUB_OUTPUT
+#      - id: map
+#        run: |
+#          case "${{ github.event.inputs.environment }}" in
+#            cloud-dev) echo "branch=dev" >> $GITHUB_OUTPUT ;;
+#            cloud-test) echo "branch=test" >> $GITHUB_OUTPUT ;;
+#            cloud-prod) echo "branch=main" >> $GITHUB_OUTPUT ;;
+#          esac
 
 # ==================================================
 # 🏗️ BUILD + ZIP + ARTIFACT
