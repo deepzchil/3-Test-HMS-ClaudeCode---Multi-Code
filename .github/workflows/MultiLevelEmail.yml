@@ -59,14 +59,14 @@ jobs:
       - name: Set Branch
         id: set-branch
         run: |
-          ENV=${{ github.event.inputs.environment }}
+          ENV=${{ github.event.inputs.env_target }}
 
           if [ "$ENV" = "cloud-dev" ]; then
-            echo "branch=his-production" >> $GITHUB_OUTPUT
+            echo "branch=his-production"
           elif [ "$ENV" = "cloud-test" ]; then
-            echo "branch=his-production" >> $GITHUB_OUTPUT
+            echo "branch=his-production"
           else
-            echo "branch=his-production" >> $GITHUB_OUTPUT
+            echo "branch=his-production"
           fi
     
 # -------------------------------------------------------
@@ -280,6 +280,9 @@ jobs:
     needs: build
     if: github.event.inputs.environment != 'cloud-dev'
     runs-on: ubuntu-latest
+    env:
+      SMTP_USERNAME: ${{ secrets.SMTP_USER }}
+      SMTP_PASSWORD: ${{ secrets.SMTP_PASS }}
 
     steps:
       - name: Send Lead Mail
@@ -288,12 +291,12 @@ jobs:
           server_address: smtp.gmail.com
           server_port: 587
           secure: false
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          username: ${{ env.SMTP_USERNAME }}
+          password: ${{ env.SMTP_PASSWORD }}
           subject: Lead Approval Required | ${{ github.repository }}
           to: ${{ env.LEAD_EMAIL }}
           cc: ${{ env.TEAM_CC }}
-          from: ${{ secrets.SMTP_USERNAME }}
+          from: ${{ env.SMTP_USERNAME }}
           html_body: |
             <html>
             <body style="font-family:Arial,Helvetica,sans-serif;color:#333;line-height:1.6;">
@@ -365,11 +368,11 @@ jobs:
           server_address: smtp.gmail.com
           server_port: 587
           secure: false
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
           subject: Manager Approval Required | Production Deployment | ${{ github.repository }}
           to: ${{ env.MANAGER_EMAIL }}
-          from: ${{ secrets.SMTP_USERNAME }}
+          from: ${{ secrets.SMTP_USER }}
           html_body: |
             <html>
             <body style="font-family:Arial,Helvetica,sans-serif;color:#333;line-height:1.6;">
@@ -620,11 +623,11 @@ jobs:
         with:
           server_address: smtp.gmail.com
           server_port: 587
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
           subject: Production Deployment Successful | ${{ github.repository }}
           to: ${{ env.MANAGER_EMAIL }}
-          from: ${{ secrets.SMTP_USERNAME }}
+          from: ${{ secrets.SMTP_USER }}
           html_body: |
             <html>
             <body style="font-family:Arial,Helvetica,sans-serif;color:#333;line-height:1.6;">
@@ -678,11 +681,11 @@ jobs:
         with:
           server_address: smtp.gmail.com
           server_port: 587
-          username: ${{ secrets.SMTP_USERNAME }}
-          password: ${{ secrets.SMTP_PASSWORD }}
+          username: ${{ secrets.SMTP_USER }}
+          password: ${{ secrets.SMTP_PASS }}
           subject: Production Deployment Failed | ${{ github.repository }}
           to: ${{ env.MANAGER_EMAIL }}
-          from: ${{ secrets.SMTP_USERNAME }}
+          from: ${{ secrets.SMTP_USER }}
           html_body: |
             <html>
             <body style="font-family:Arial,Helvetica,sans-serif;color:#333;line-height:1.6;">
